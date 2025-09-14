@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Image Test - Fixed</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        button { padding: 10px 15px; margin: 5px; }
+        #status { padding: 10px; background: #f0f0f0; margin: 10px 0; }
+        #results { padding: 10px; background: #e8f4fd; margin: 10px 0; }
+        .connected { background: #d4edda !important; }
+        .error { background: #f8d7da !important; }
+    </style>
+</head>
+<body>
+    <h1>WebSocket Image Test</h1>
+    
+    <!-- Controls -->
+    <input type="file" id="imageInput" accept="image/*">
+    <button onclick="sendImage()">Send Single Image</button>
+    <button id="cameraBtn" onclick="toggleCamera()">Start Camera Stream</button>
+    <button onclick="testConnection()">Test Connection</button>
+    
+    <!-- Status Display -->
+    <div id="status">Not connected</div>
+    <div id="results">No results yet</div>
+    
+    <!-- Hidden elements -->
+    <canvas id="canvas" style="display:none;"></canvas>
+    <video id="video" style="display:none;" autoplay playsinline></video>
+
+    <script>
+        let ws = null;
+        let video = document.getElementById('video');
+        let canvas = document.getElementById('canvas');
+        let ctx = canvas.getContext('2d');
+        let cameraInterval = null;
+        let isStreaming = false;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 5;
+
+        // Connect to WebSocket with proper error handling
+        function connectWebSocket() {
+            if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+                console.log('WebSocket already connecting or connected');
+                return Promise.resolve();
+            }
+
+            return new Promise((resolve, reject) => {
+                console.log('Connecting to WebSocket...');
+                ws = new WebSocket('ws://localhost:8000/ws');
+                
+                const timeout = setTimeout(() => {
+                    ws.close();
+                    reject(new Error('Connection timeout'));
+                }, 5000);
+
+                ws.onopen = function() {
+                    clearTimeout(timeout);
+                    reconnectAttempts = 0;
+                    updateStatus('Connected to WebSocket', 'connected');
+                    console.log('WebSocket connected successfully');
+                    resolve();
+                };
+                
+                ws.onmessage = function(event) {
+                    try {
+                        const response = JSON.parse(event.data);
+                        updateResults(response);
+                        console.log('Received:', response);
+                    } catch (e) {
+                        console.error('Error parsing response:', e);
+                    }
+                };
+                
+                ws.onclose = function(event) {
+                    clearTimeout(timeout);
+                    console.log('WebSocket closed:', event.code, event.reason);
+                    
+                    if (isStreaming && reconnectAttempts < maxReconnectAttempts) {
+                        reconnectAttempts++;
+                        updateStatus(`Reconnecting... (${reconnectAttempts}/${maxReconnectAttempts})`, 'error');
+                        setTimeout(() => {
+                            connectWebSocket().then(() => {
+                                if (isStreaming) {
+                                    startCameraStream();
+                                }
+                            }).catch(console.error);
+                        }, 2000);
+                    } else {
+                        updateStatus('WebSocket disconnected', 'error');
+                        stopCamera();
+                    }
+                };
+                
+                ws.onerror = function(error) {
+                    clearTimeout(timeout);
+                    console.error('WebSocket error:', error);
+                    updateStatus('WebSocket error - Check if server is running', 'error');
+                    reject(error);
+                };
+            });
+        }
+
+        // Update status display
+        function updateStatus(message, type = '') {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = message;
+            statusDiv.className = type;
+        }
+
+        // Update results display
+        function updateResults(response) {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = `
+                <strong>Latest Response:</strong><br>
+                <pre>${JSON.stringify(response, null, 2)}</pre>
+                <small>Time: ${new Date().toLocaleTimeString()}</small>
+            `;
+        }
+
+        // Send single image
+        async function sendImage() {
+            const fileInput = document.getElementById('imageInput');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('Please select an image first');
+                return;
+            }
+            
+            try {
+                await ensureConnection();
+                
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const base64Data = e.target.result;
+                    console.log('Sending single image...');
+                    ws.send(base64Data);
+                };
+                reader.readAsDataURL(file);
+            } catch (error) {
+                alert('Failed to connect to server. Is it running?');
+            }
+        }
+
+        // Toggle camera streaming
+        async function toggleCamera() {
+            if (isStreaming) {
+                stopCamera();
+            } else {
+                await startCamera();
+            }
+        }
+
+        // Start camera streaming
+        async function startCamera() {
+            try {
+                await ensureConnection();
+                
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        width: { ideal: 640 }, 
+                        height: { ideal: 480 }
+                    } 
+                });
+                
+                video.srcObject = stream;
+                isStreaming = true;
+                document.getElementById('cameraBtn').textContent = 'Stop Camera Stream';
+                updateStatus('Camera started - Streaming every 2 seconds', 'connected');
+                
+                // Wait for video to be ready
+                video.onloadedmetadata = function() {
+                    console.log(`Camera ready: ${video.videoWidth}x${video.videoHeight}`);
+                    startCameraStream();
+                };
+                
+            } catch (error) {
+                console.error('Camera error:', error);
+                alert('Camera access failed: ' + error.message);
+                stopCamera();
+            }
+        }
+
+        // Start the actual streaming interval
+        function startCameraStream() {
+            if (cameraInterval) {
+                clearInterval(cameraInterval);
+            }
+            
+            cameraInterval = setInterval(() => {
+                if (ws && ws.readyState === WebSocket.OPEN && isStreaming) {
+                    captureAndSend();
+                } else if (isStreaming) {
+                    console.log('WebSocket not ready, skipping frame');
+                }
+            }, 2000); // Send every 2 seconds
+        }
+
+        // Stop camera
+        function stopCamera() {
+            isStreaming = false;
+            
+            if (cameraInterval) {
+                clearInterval(cameraInterval);
+                cameraInterval = null;
+            }
+            
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+            }
+            
+            document.getElementById('cameraBtn').textContent = 'Start Camera Stream';
+            updateStatus('Camera stopped');
+            console.log('Camera stopped');
+        }
+
+        // Capture and send frame
+        function captureAndSend() {
+            try {
+                if (!video.videoWidth || !video.videoHeight) {
+                    console.log('Video not ready yet');
+                    return;
+                }
+                
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                ctx.drawImage(video, 0, 0);
+                
+                const base64Data = canvas.toDataURL('image/jpeg', 0.8);
+                console.log(`Sending frame at ${new Date().toLocaleTimeString()}`);
+                ws.send(base64Data);
+                
+            } catch (error) {
+                console.error('Error capturing frame:', error);
+            }
+        }
+
+        // Ensure WebSocket connection
+        async function ensureConnection() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                await connectWebSocket();
+            }
+        }
+
+        // Test connection
+        async function testConnection() {
+            try {
+                await connectWebSocket();
+                alert('Connection successful!');
+            } catch (error) {
+                alert('Connection failed: ' + error.message);
+            }
+        }
+
+        // Initialize on page load
+        window.onload = function() {
+            connectWebSocket().catch(console.error);
+        };
+
+        // Cleanup on page unload
+        window.onbeforeunload = function() {
+            stopCamera();
+            if (ws) {
+                ws.close();
+            }
+        };
+    </script>
+</body>
+</html>

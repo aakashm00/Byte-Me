@@ -1,0 +1,12 @@
+FastAPI
+uvicorn
+pydantic
+python-dotenv
+websockets
+opencv-python
+connectonion==0.0.9
+requests
+numpy
+pytesseract
+langdetect
+python-multipart

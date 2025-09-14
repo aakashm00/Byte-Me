@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OCR Scanner with AI Voice</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .camera-section {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        #video {
+            width: 100%;
+            max-width: 500px;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+        }
+        #canvas {
+            display: none;
+        }
+        .buttons {
+            margin: 20px 0;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            margin: 5px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .upload-section {
+            margin: 30px 0;
+            text-align: center;
+        }
+        .file-input {
+            margin: 10px 0;
+        }
+        .result {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 20px;
+            margin-top: 20px;
+            min-height: 100px;
+            position: relative;
+            white-space: pre-line; /* Add this line */
+            line-height: 1.6; /* Add this for better readability */
+        }
+        .loading {
+            color: #007bff;
+            font-style: italic;
+        }
+        .error {
+            color: #dc3545;
+        }
+        .success {
+            color: #28a745;
+        }
+        .tts-controls {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #dee2e6;
+            text-align: center;
+        }
+        .tts-button {
+            background: #28a745;
+            font-size: 14px;
+            padding: 10px 20px;
+            margin: 5px;
+        }
+        .tts-button:hover {
+            background: #218838;
+        }
+        .tts-button:disabled {
+            background: #ccc;
+        }
+        .speaking {
+            background: #dc3545 !important;
+        }
+        .chat-section {
+            margin: 30px 0;
+        }
+        .chat-input-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        #chatInput {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        .voice-button {
+            background: #6f42c1;
+            padding: 10px 15px;
+            border-radius: 50%;
+            font-size: 18px;
+            width: 50px;
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .voice-button:hover {
+            background: #5a359a;
+        }
+        .voice-button.recording {
+            background: #dc3545;
+            animation: pulse 1s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .section-divider {
+            border-bottom: 2px solid #eee;
+            margin: 30px 0;
+            padding-bottom: 10px;
+        }
+        .voice-status {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📸 OCR Scanner with AI Voice</h1>
+            <p>Capture documents, extract text, and listen with AI-powered speech</p>
+        </div>
+        
+        <!-- Camera Section -->
+        <div class="camera-section section-divider">
+            <h2>📷 Camera Capture</h2>
+            <video id="video" autoplay></video>
+            <canvas id="canvas"></canvas>
+            
+            <div class="buttons">
+                <button id="startCamera">📹 Start Camera</button>
+                <button id="captureBtn" disabled>📸 Capture & Scan</button>
+                <button id="stopCamera" disabled>⏹️ Stop Camera</button>
+            </div>
+        </div>
+
+        <!-- File Upload Section -->
+        <div class="upload-section section-divider">
+            <h2>📁 Upload Image</h2>
+            <input type="file" id="fileInput" accept="image/*" class="file-input">
+            <br>
+            <button id="uploadBtn">📤 Upload & Scan</button>
+        </div>
+
+        <!-- Chat Section -->
+        <div class="chat-section section-divider">
+            <h2>💬 Voice Chat</h2>
+            <div class="chat-input-container">
+                <input type="text" id="chatInput" placeholder="Type or speak your message...">
+                <button id="voiceBtn" class="voice-button" title="Click and speak">🎤</button>
+                <button id="chatBtn">💬 Send</button>
+            </div>
+            <div id="voiceStatus" class="voice-status">Click the microphone to speak</div>
+        </div>
+
+        <!-- Results -->
+        <div class="result" id="result">
+            <p>👋 Welcome! Use camera capture or upload an image to extract text.</p>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000';
+        
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const result = document.getElementById('result');
+        const chatInput = document.getElementById('chatInput');
+        const voiceBtn = document.getElementById('voiceBtn');
+        const voiceStatus = document.getElementById('voiceStatus');
+        
+        let stream = null;
+        let currentAudio = null;
+        let lastResponseText = '';
+        let recognition = null;
+        let isRecording = false;
+
+// Speech Recognition Setup - IMPROVED VERSION
+function initSpeechRecognition() {
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        recognition = new SpeechRecognition();
+        
+        // IMPROVED SETTINGS
+        recognition.continuous = true;  // Keep listening continuously
+        recognition.interimResults = true;  // Show results as you speak
+        recognition.lang = 'en-US';
+        recognition.maxAlternatives = 1;
+        
+        let finalTranscript = '';
+        let interimTranscript = '';
+        let timeoutId = null;
+        
+        recognition.onstart = () => {
+            isRecording = true;
+            voiceBtn.classList.add('recording');
+            voiceBtn.textContent = '🔴';
+            voiceStatus.textContent = 'Listening... Take your time, speak naturally';
+            voiceStatus.style.color = '#dc3545';
+            
+            finalTranscript = '';
+            interimTranscript = '';
+            chatInput.value = '';
+        };
+        
+        recognition.onresult = (event) => {
+            interimTranscript = '';
+            
+            // Process all results
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+                const transcript = event.results[i][0].transcript;
+                
+                if (event.results[i].isFinal) {
+                    finalTranscript += transcript + ' ';
+                } else {
+                    interimTranscript += transcript;
+                }
+            }
+            
+            // Update input field with combined transcript
+            chatInput.value = finalTranscript + interimTranscript;
+            
+            // Show status
+            if (finalTranscript.length > 0) {
+                voiceStatus.textContent = 'Keep speaking or click stop when done...';
+                voiceStatus.style.color = '#28a745';
+            } else {
+                voiceStatus.textContent = 'Listening... Keep speaking naturally';
+                voiceStatus.style.color = '#dc3545';
+            }
+            
+            // Clear any existing timeout
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+            
+            // Set a longer timeout for silence (5 seconds)
+            timeoutId = setTimeout(() => {
+                if (isRecording && finalTranscript.trim().length > 0) {
+                    recognition.stop();
+                }
+            }, 5000); // 5 seconds of silence before auto-stop
+        };
+        
+        recognition.onend = () => {
+            isRecording = false;
+            voiceBtn.classList.remove('recording');
+            voiceBtn.textContent = '🎤';
+            
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+                timeoutId = null;
+            }
+            
+            // Clean up the final transcript
+            const cleanTranscript = (finalTranscript + interimTranscript).trim();
+            chatInput.value = cleanTranscript;
+            
+            if (cleanTranscript.length > 0) {
+                voiceStatus.textContent = `✅ Recorded: "${cleanTranscript.substring(0, 50)}..." - Edit or send!`;
+                voiceStatus.style.color = '#28a745';
+            } else {
+                voiceStatus.textContent = 'No speech detected. Try again.';
+                voiceStatus.style.color = '#dc3545';
+            }
+            
+            // Reset status after 5 seconds
+            setTimeout(() => {
+                if (!isRecording) {
+                    voiceStatus.textContent = 'Click the microphone to speak';
+                    voiceStatus.style.color = '#666';
+                }
+            }, 5000);
+        };
+        
+        recognition.onerror = (event) => {
+            isRecording = false;
+            voiceBtn.classList.remove('recording');
+            voiceBtn.textContent = '🎤';
+            
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+                timeoutId = null;
+            }
+            
+            let errorMessage = 'Speech recognition error';
+            switch(event.error) {
+                case 'no-speech':
+                    errorMessage = 'No speech detected - try speaking louder';
+                    break;
+                case 'audio-capture':
+                    errorMessage = 'Microphone not available';
+                    break;
+                case 'not-allowed':
+                    errorMessage = 'Microphone access denied';
+                    break;
+                case 'network':
+                    errorMessage = 'Network error - check connection';
+                    break;
+                case 'aborted':
+                    // Don't show error for manual stops
+                    errorMessage = 'Recording stopped';
+                    break;
+            }
+            
+            voiceStatus.textContent = errorMessage;
+            voiceStatus.style.color = '#dc3545';
+            
+            setTimeout(() => {
+                voiceStatus.textContent = 'Click the microphone to speak';
+                voiceStatus.style.color = '#666';
+            }, 3000);
+        };
+        
+        return true;
+    } else {
+        voiceStatus.textContent = 'Speech recognition not supported in this browser';
+        voiceStatus.style.color = '#dc3545';
+        voiceBtn.disabled = true;
+        return false;
+    }
+}
+
+voiceBtn.onclick = () => {
+    if (!recognition) {
+        voiceStatus.textContent = 'Speech recognition not available';
+        return;
+    }
+    
+    if (isRecording) {
+        // Manual stop
+        recognition.stop();
+        voiceStatus.textContent = 'Stopping recording...';
+        voiceStatus.style.color = '#666';
+    } else {
+        // Start recording
+        try {
+            recognition.start();
+        } catch (error) {
+            console.error('Recognition start error:', error);
+            voiceStatus.textContent = 'Could not start recording. Try again.';
+            voiceStatus.style.color = '#dc3545';
+        }
+    }
+};
+// Add keyboard shortcut for voice (optional)
+document.addEventListener('keydown', (e) => {
+    // Press and hold Space bar to record (when chat input is not focused)
+    if (e.code === 'Space' && !chatInput.matches(':focus') && !isRecording) {
+        e.preventDefault();
+        voiceBtn.click();
+    }
+});
+
+document.addEventListener('keyup', (e) => {
+    // Release Space bar to stop recording
+    if (e.code === 'Space' && isRecording) {
+        e.preventDefault();
+        voiceBtn.click();
+    }
+});
+
+        // Audio/TTS Functions
+        async function speakText(text) {
+            try {
+                // Stop any currently playing audio
+                if (currentAudio) {
+                    currentAudio.pause();
+                    currentAudio = null;
+                }
+
+                // Update button state
+                const ttsButtons = document.querySelectorAll('.tts-button');
+                ttsButtons.forEach(btn => {
+                    btn.textContent = '🔄 Generating...';
+                    btn.disabled = true;
+                });
+
+                // Clean text for speech
+                const cleanText = cleanTextForSpeech(text);
+                
+                // Call OpenAI TTS API
+                const response = await fetch(`${API_BASE}/tts?text=${encodeURIComponent(cleanText)}`, {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    const audioBlob = await response.blob();
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    currentAudio = new Audio(audioUrl);
+                    
+                    // Update button to stop
+                    ttsButtons.forEach(btn => {
+                        btn.textContent = '⏹️ Stop';
+                        btn.disabled = false;
+                        btn.classList.add('speaking');
+                        btn.onclick = () => stopAudio();
+                    });
+                    
+                    // Play audio
+                    currentAudio.play();
+                    
+                    // Reset button when finished
+                    currentAudio.onended = () => {
+                        resetTTSButtons();
+                    };
+                    
+                } else {
+                    throw new Error('TTS API failed');
+                }
+                
+            } catch (error) {
+                console.error('TTS error:', error);
+                
+                // Reset buttons on error
+                const ttsButtons = document.querySelectorAll('.tts-button');
+                ttsButtons.forEach(btn => {
+                    btn.textContent = '❌ Error';
+                    btn.disabled = false;
+                    setTimeout(() => {
+                        btn.textContent = '🔊 Read Aloud';
+                        btn.onclick = () => speakText(lastResponseText);
+                    }, 2000);
+                });
+            }
+        }
+
+        function stopAudio() {
+            if (currentAudio) {
+                currentAudio.pause();
+                currentAudio = null;
+            }
+            resetTTSButtons();
+        }
+
+        function resetTTSButtons() {
+            const ttsButtons = document.querySelectorAll('.tts-button');
+            ttsButtons.forEach(btn => {
+                btn.textContent = '🔊 Read Aloud';
+                btn.disabled = false;
+                btn.classList.remove('speaking');
+                btn.onclick = () => speakText(lastResponseText);
+            });
+        }
+
+        function cleanTextForSpeech(text) {
+            // Remove HTML tags
+            text = text.replace(/<[^>]*>/g, '');
+            
+            // Remove emojis and special characters
+            text = text.replace(/[📸📁💬✅❌🔄📹⏱️📊🎯📷📤📋]/g, '');
+            
+            // Remove confidence and word count info
+            text = text.replace(/\(Confidence:.*?\)/g, '');
+            text = text.replace(/Confidence: \d+\.\d+%/g, '');
+            text = text.replace(/Word count: \d+/g, '');
+            
+            // Remove extra parentheses content
+            text = text.replace(/\([^)]*\)/g, '');
+            
+            // Clean up spacing
+            text = text.replace(/\s+/g, ' ').trim();
+            
+            return text;
+        }
+
+        function displayResultWithTTS(content, type = 'success') {
+            result.innerHTML = content;
+            
+            // Extract text for TTS
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = content;
+            const textContent = tempDiv.textContent || tempDiv.innerText || '';
+            lastResponseText = textContent;
+            
+            // Add TTS controls if there's meaningful text to read
+            if (textContent.trim() && type === 'success' && textContent.length > 10) {
+                const ttsDiv = document.createElement('div');
+                ttsDiv.className = 'tts-controls';
+                ttsDiv.innerHTML = `
+                    <button class="tts-button" onclick="speakText(lastResponseText)">🔊 Read Aloud</button>
+                `;
+                result.appendChild(ttsDiv);
+            }
+        }
+
+        // Initialize speech recognition when page loads
+        window.onload = () => {
+            initSpeechRecognition();
+        };
+
+        // Camera controls
+        document.getElementById('startCamera').onclick = async () => {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        facingMode: 'environment', // Use back camera on mobile
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    }
+                });
+                video.srcObject = stream;
+                
+                document.getElementById('startCamera').disabled = true;
+                document.getElementById('captureBtn').disabled = false;
+                document.getElementById('stopCamera').disabled = false;
+                
+                displayResultWithTTS('<p class="success">📹 Camera started! Position your document and click capture.</p>', 'info');
+            } catch (err) {
+                displayResultWithTTS('<p class="error">❌ Camera access denied. Please allow camera access and try again.</p>', 'error');
+            }
+        };
+
+        document.getElementById('stopCamera').onclick = () => {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+                
+                document.getElementById('startCamera').disabled = false;
+                document.getElementById('captureBtn').disabled = true;
+                document.getElementById('stopCamera').disabled = true;
+                
+                displayResultWithTTS('<p>📹 Camera stopped.</p>', 'info');
+            }
+        };
+
+        // Capture and scan
+        document.getElementById('captureBtn').onclick = async () => {
+            // Set canvas size to video size
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            
+            // Draw current video frame to canvas
+            ctx.drawImage(video, 0, 0);
+            
+            // Convert to base64
+            const base64Image = canvas.toDataURL('image/jpeg', 0.8);
+            
+            displayResultWithTTS('<p class="loading">🔄 Processing captured image...</p>', 'loading');
+            
+            try {
+                const response = await fetch(`${API_BASE}/ocr/camera`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        image: base64Image,
+                        message: "Extract all text from this image clearly and accurately."
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    displayResultWithTTS(`<h3>✅ Text Extracted from Camera:</h3><p>${data.response}</p>`);
+                } else {
+                    displayResultWithTTS(`<p class="error">❌ Error: ${data.detail || 'Unknown error occurred'}</p>`, 'error');
+                }
+            } catch (error) {
+                displayResultWithTTS(`<p class="error">❌ Network error: ${error.message}</p>`, 'error');
+            }
+        };
+
+        // File upload
+        document.getElementById('uploadBtn').onclick = async () => {
+            const fileInput = document.getElementById('fileInput');
+            
+            if (!fileInput.files[0]) {
+                displayResultWithTTS('<p class="error">❌ Please select an image file first.</p>', 'error');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            formData.append('message', 'Extract all text from this uploaded image clearly and accurately.');
+            
+            displayResultWithTTS('<p class="loading">🔄 Processing uploaded image...</p>', 'loading');
+            
+            try {
+                const response = await fetch(`${API_BASE}/ocr/upload`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    displayResultWithTTS(`<h3>✅ Text Extracted from "${data.filename}":</h3><p>${data.response}</p>`);
+                } else {
+                    displayResultWithTTS(`<p class="error">❌ Error: ${data.detail || 'Unknown error occurred'}</p>`, 'error');
+                }
+            } catch (error) {
+                displayResultWithTTS(`<p class="error">❌ Network error: ${error.message}</p>`, 'error');
+            }
+        };
+
+        // Chat
+        document.getElementById('chatBtn').onclick = async () => {
+            const message = chatInput.value.trim();
+            
+            if (!message) {
+                displayResultWithTTS('<p class="error">❌ Please enter or speak a message first.</p>', 'error');
+                return;
+            }
+            
+            displayResultWithTTS('<p class="loading">🔄 Thinking...</p>', 'loading');
+            
+            try {
+                const response = await fetch(`${API_BASE}/chat?message=${encodeURIComponent(message)}`, {
+                    method: 'POST'
+                });
+                
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    displayResultWithTTS(`<h3>💬 Chat Response:</h3><p>${data.response}</p>`);
+                } else {
+                    displayResultWithTTS(`<p class="error">❌ Error: ${data.detail || 'Unknown error occurred'}</p>`, 'error');
+                }
+                
+                chatInput.value = '';
+            } catch (error) {
+                displayResultWithTTS(`<p class="error">❌ Network error: ${error.message}</p>`, 'error');
+            }
+        };
+
+        // Allow Enter key for chat
+        chatInput.onkeypress = (e) => {
+            if (e.key === 'Enter') {
+                document.getElementById('chatBtn').click();
+            }
+        };
+
+        // File input change handler for immediate feedback
+        document.getElementById('fileInput').onchange = (e) => {
+            if (e.target.files[0]) {
+                const fileName = e.target.files[0].name;
+                displayResultWithTTS(`<p class="success">📁 Selected: ${fileName}. Click "Upload & Scan" to process.</p>`, 'info');
+            }
+        };
+
+        // Stop audio and recognition when page unloads
+        window.addEventListener('beforeunload', () => {
+            if (currentAudio) {
+                currentAudio.pause();
+            }
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+            if (recognition && isRecording) {
+                recognition.stop();
+            }
+        });
+    </script>
+</body>
+</html>
